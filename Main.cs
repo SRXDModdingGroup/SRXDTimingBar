@@ -36,15 +36,18 @@ namespace SRXDTimingBar {
         private enum Layer {
             GoodBar,
             PerfectBar,
-            ZeroLine,
+            MarvelousBar,
+            CrazyBar,
+            MedianPointer,
             TimingTick,
-            MedianPointer
+            ZeroLine
         }
         
         private static readonly float BAR_WIDTH = 1.6f;
         private static readonly float BAR_HEIGHT = 0.04f;
         private static float TICK_SPAN = 1.25f;
-        
+
+        private static bool scoreModMode = false;
         private static bool rootCreated;
         private static bool playing;
         private static bool pendingBeat;
@@ -60,6 +63,12 @@ namespace SRXDTimingBar {
         private static GameObject[] tickPool;
         private static Transform medianPointer;
         private static List<KeyValuePair<int, float>> timingHistory;
+
+        //[MEW CODE]
+        private static List<GameObject> vanillaRects = new List<GameObject>();
+        private static List<GameObject> moddedRects = new List<GameObject>();
+
+        
 
         [HarmonyPatch(typeof(Game), nameof(Game.Update)), HarmonyPostfix]
         private static void Game_Update_Postfix() {
@@ -77,7 +86,7 @@ namespace SRXDTimingBar {
                 return;
             
             var shift = Vector3.zero;
-
+                
             if (Input.GetKeyDown(KeyCode.LeftArrow))
                 shift += Vector3.left;
             
@@ -92,7 +101,7 @@ namespace SRXDTimingBar {
 
             if (shift == Vector3.zero)
                 return;
-            
+
             if (Input.GetKey(KeyCode.LeftShift))
                 root.localPosition += 0.01f * shift;
             else
@@ -101,8 +110,26 @@ namespace SRXDTimingBar {
             Main.BarPositionX.Value = root.localPosition.x;
             Main.BarPositionY.Value = root.localPosition.y;
             Main.ConfigFile.Save();
+
         }
         
+        [HarmonyPatch(typeof(Track), nameof(Track.Update)), HarmonyPostfix]
+        private static void Track_Update_Postfix()
+        {
+            if (Input.GetKeyDown(KeyCode.P))
+            {
+                scoreModMode = !scoreModMode;
+                foreach (GameObject rect in moddedRects)
+                {
+                    rect.SetActive(scoreModMode);
+                }
+                foreach (GameObject rect in vanillaRects)
+                {
+                    rect.SetActive(!scoreModMode);
+                }
+            }
+        }
+
         [HarmonyPatch(typeof(Track), nameof(Track.PlayTrack)), HarmonyPostfix]
         private static void Track_PlayTrack_Postfix(Track __instance) {
             playing = true;
@@ -133,9 +160,29 @@ namespace SRXDTimingBar {
 
             root.localScale = Vector3.one;
             rectSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 4f);
-            CreateRectangle(Vector3.zero, new Vector3(BAR_WIDTH, BAR_HEIGHT, 1f), Color.yellow * 0.8f, Layer.GoodBar);
-            CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_WIDTH, BAR_HEIGHT, 1f), Color.cyan * 0.8f, Layer.PerfectBar);
-            CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_HEIGHT, 3f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine);
+
+            moddedRects.Clear();
+            vanillaRects.Clear();
+
+            moddedRects.Add(CreateRectangle(Vector3.zero, new Vector3(BAR_WIDTH, BAR_HEIGHT, 1f), new Color(0.921f, 0.321f, 0.203f, 0.8f) /*orange*/, Layer.GoodBar));
+            moddedRects.Add(CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_WIDTH, BAR_HEIGHT, 1f), new Color(0.921f, 0.858f, 0.203f, 0.8f) /*yellow*/, Layer.PerfectBar));
+            moddedRects.Add(CreateRectangle(Vector3.zero, new Vector3(0.25f * BAR_WIDTH, BAR_HEIGHT, 1f), new Color(0.549f, 0.921f, 0.203f, 0.8f) /*green*/, Layer.MarvelousBar));
+            moddedRects.Add(CreateRectangle(Vector3.zero, new Vector3(0.1f * BAR_WIDTH, BAR_HEIGHT, 1f), new Color(0.203f, 0.741f, 0.921f, 0.8f) /*blue*/, Layer.CrazyBar));
+            moddedRects.Add(CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_HEIGHT, 3f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine));
+
+            vanillaRects.Add(CreateRectangle(Vector3.zero, new Vector3(BAR_WIDTH, BAR_HEIGHT, 1f), Color.yellow * 0.8f, Layer.GoodBar));
+            vanillaRects.Add(CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_WIDTH, BAR_HEIGHT, 1f), Color.cyan * 0.8f, Layer.PerfectBar));
+            vanillaRects.Add(CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_HEIGHT, 3f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine));
+
+            foreach (GameObject rect in moddedRects)
+            {
+                rect.SetActive(scoreModMode);
+            }
+            foreach (GameObject rect in vanillaRects)
+            {
+                rect.SetActive(!scoreModMode);
+            }
+
             tickCount = Main.TimingSamples.Value;
             tickPool = new GameObject[tickCount];
             medianSmoothing = Main.MedianSmoothing.Value;
