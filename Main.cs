@@ -64,7 +64,6 @@ namespace SRXDTimingBar {
         private static Transform medianPointer;
         private static List<KeyValuePair<int, float>> timingHistory;
 
-        //[MEW CODE]
         private static List<GameObject> vanillaRects = new List<GameObject>();
         private static List<GameObject> moddedRects = new List<GameObject>();
 
