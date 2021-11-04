@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.IL2CPP;
@@ -34,7 +36,9 @@ namespace SRXDTimingBar {
 
     public class Mod {
         private enum Layer {
+            OkayBar,
             GoodBar,
+            GreatBar,
             PerfectBar,
             ZeroLine,
             TimingTick,
@@ -44,8 +48,7 @@ namespace SRXDTimingBar {
         private static readonly float BAR_WIDTH = 1.6f;
         private static readonly float BAR_HEIGHT = 0.04f;
         private static float TICK_SPAN = 1.25f;
-        
-        private static bool rootCreated;
+        private static bool initialized;
         private static bool playing;
         private static bool pendingBeat;
         private static int tickCount;
@@ -57,6 +60,7 @@ namespace SRXDTimingBar {
         private static float medianSmoothing;
         private static Transform root;
         private static Sprite rectSprite;
+        private static List<GameObject> segments;
         private static GameObject[] tickPool;
         private static Transform medianPointer;
         private static List<KeyValuePair<int, float>> timingHistory;
@@ -107,7 +111,7 @@ namespace SRXDTimingBar {
         private static void Track_PlayTrack_Postfix(Track __instance) {
             playing = true;
             
-            if (rootCreated) {
+            if (initialized) {
                 root.gameObject.SetActive(true);
 
                 foreach (var tick in tickPool)
@@ -118,12 +122,71 @@ namespace SRXDTimingBar {
                 medianPointer.localPosition = new Vector3(0f, medianPointerY, 0f);
                 timingHistory.Clear();
                 currentTick = 0;
-
-                return;
             }
+            else
+                Initialize(__instance);
+            
+            CreateTimingBar();
+        }
+
+        [HarmonyPatch(typeof(Track), nameof(Track.CompleteSong)), HarmonyPostfix]
+        private static void Track_CompleteSong_Postfix() {
+            if (!initialized)
+                return;
+            
+            root.gameObject.SetActive(false);
+            playing = false;
+        }
+        
+        [HarmonyPatch(typeof(Track), nameof(Track.FailSong)), HarmonyPostfix]
+        private static void Track_FailSong_Postfix() {
+            if (!initialized)
+                return;
+            
+            root.gameObject.SetActive(false);
+            playing = false;
+        }
+
+        [HarmonyPatch(typeof(XDPauseMenu), nameof(XDPauseMenu.ExitButtonPressed)), HarmonyPostfix]
+        private static void XDPauseMenu_ExitButtonPressed_Postfix() {
+            if (!initialized)
+                return;
+            
+            root.gameObject.SetActive(false);
+            playing = false;
+        }
+        
+        [HarmonyPatch(typeof(GameplayVariables), nameof(GameplayVariables.GetTimingAccuracy)), HarmonyPostfix]
+        private static void GameplayVariables_GetTimingAccuracy_Postfix(float timeOffset) {
+            if (!initialized)
+                return;
+            
+            PlaceTickAtTime(timeOffset);
+        }
+
+        [HarmonyPatch(typeof(GameplayVariables), nameof(GameplayVariables.GetTimingAccuracyForBeat)), HarmonyPostfix]
+        private static void GameplayVariables_GetTimingAccuracyForBeat_Postfix(float timeOffset) {
+            if (!initialized)
+                return;
+
+            pendingBeat = true;
+            beatOffset = timeOffset;
+        }
+
+        [HarmonyPatch(typeof(PlayState.ScoreState), nameof(PlayState.ScoreState.AddScore)), HarmonyPostfix]
+        private static void ScoreState_AddScore_Postfix(int amount) {
+            if (pendingBeat && amount == 16)
+                PlaceTickAtTime(beatOffset);
+
+            pendingBeat = false;
+        }
+
+        private static void Initialize(Track track)
+        {
+            ScoreModWrapper.Initialize();
             
             root = new GameObject().transform;
-            root.parent = __instance.cameraContainerTransform.GetComponentInChildren<Camera>().transform;
+            root.parent = track.cameraContainerTransform.GetComponentInChildren<Camera>().transform;
             root.localPosition = new Vector3(Main.BarPositionX.Value, Main.BarPositionY.Value, 0.5f);
             
             if (Main.OrientVertically.Value)
@@ -133,9 +196,6 @@ namespace SRXDTimingBar {
 
             root.localScale = Vector3.one;
             rectSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 4f);
-            CreateRectangle(Vector3.zero, new Vector3(BAR_WIDTH, BAR_HEIGHT, 1f), Color.yellow * 0.8f, Layer.GoodBar);
-            CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_WIDTH, BAR_HEIGHT, 1f), Color.cyan * 0.8f, Layer.PerfectBar);
-            CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_HEIGHT, 3f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine);
             tickCount = Main.TimingSamples.Value;
             tickPool = new GameObject[tickCount];
             medianSmoothing = Main.MedianSmoothing.Value;
@@ -150,59 +210,78 @@ namespace SRXDTimingBar {
             medianPointerY = 0.65f * BAR_HEIGHT;
             medianPointer = CreateRectangle(new Vector3(0f, medianPointerY, 0f), new Vector3(BAR_HEIGHT, BAR_HEIGHT, 1f), Color.white, Layer.MedianPointer).transform;
             timingHistory = new List<KeyValuePair<int, float>>();
-            rootCreated = true;
+            segments = new List<GameObject>();
+            CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_HEIGHT, 3f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine);
+            initialized = true;
         }
 
-        [HarmonyPatch(typeof(Track), nameof(Track.CompleteSong)), HarmonyPostfix]
-        private static void Track_CompleteSong_Postfix() {
-            if (!rootCreated)
+        private static void CreateTimingBar()
+        {
+            if (!initialized)
                 return;
+
+            foreach (var segment in segments)
+                GameObject.Destroy(segment);
             
-            root.gameObject.SetActive(false);
-            playing = false;
-        }
-        
-        [HarmonyPatch(typeof(Track), nameof(Track.FailSong)), HarmonyPostfix]
-        private static void Track_FailSong_Postfix() {
-            if (!rootCreated)
-                return;
-            
-            root.gameObject.SetActive(false);
-            playing = false;
+            segments.Clear();
+
+            if (ScoreModWrapper.ShowModdedScore)
+                CreateModTimingBar();
+            else
+            {
+                segments.Add(CreateRectangle(Vector3.zero, new Vector3(BAR_WIDTH, BAR_HEIGHT, 1f), Color.yellow * 0.8f, Layer.GoodBar));
+                segments.Add(CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_WIDTH, BAR_HEIGHT, 1f), Color.cyan * 0.8f, Layer.PerfectBar));
+            }
         }
 
-        [HarmonyPatch(typeof(XDPauseMenu), nameof(XDPauseMenu.ExitButtonPressed)), HarmonyPostfix]
-        private static void XDPauseMenu_ExitButtonPressed_Postfix() {
-            if (!rootCreated)
-                return;
-            
-            root.gameObject.SetActive(false);
-            playing = false;
-        }
-        
-        [HarmonyPatch(typeof(GameplayVariables), nameof(GameplayVariables.GetTimingAccuracy)), HarmonyPostfix]
-        private static void GameplayVariables_GetTimingAccuracy_Postfix(float timeOffset) {
-            if (!rootCreated)
-                return;
-            
-            PlaceTickAtTime(timeOffset);
-        }
+        private static void CreateModTimingBar()
+        {
+            var profile = ScoreMod.ModState.CurrentContainer.Profile;
+            var previousLayer = Layer.ZeroLine;
 
-        [HarmonyPatch(typeof(GameplayVariables), nameof(GameplayVariables.GetTimingAccuracyForBeat)), HarmonyPostfix]
-        private static void GameplayVariables_GetTimingAccuracyForBeat_Postfix(float timeOffset) {
-            if (!rootCreated)
-                return;
+            for (int i = profile.PressNoteWindows.Count - 1; i >= 0; i--)
+            {
+                var window = profile.PressNoteWindows[i];
+                float width;
 
-            pendingBeat = true;
-            beatOffset = timeOffset;
-        }
+                if (i == profile.PressNoteWindows.Count - 1)
+                    width = 1f;
+                else
+                    width = 10f * profile.PressNoteWindows[i + 1].LowerBound;
+                
+                Color color;
+                Layer layer;
 
-        [HarmonyPatch(typeof(PlayState.ScoreState), nameof(PlayState.ScoreState.AddScore)), HarmonyPostfix]
-        private static void ScoreState_AddScore_Postfix(int amount) {
-            if (pendingBeat && amount == 16)
-                PlaceTickAtTime(beatOffset);
+                switch (window.Accuracy)
+                {
+                    case ScoreMod.Accuracy.Perfect:
+                        color = Color.cyan;
+                        layer = Layer.PerfectBar;
+                        
+                        break;
+                    case ScoreMod.Accuracy.Great:
+                        color = Color.green;
+                        layer = Layer.GreatBar;
+                        
+                        break;
+                    case ScoreMod.Accuracy.Good:
+                        color = Color.yellow;
+                        layer = Layer.GoodBar;
+                        
+                        break;
+                    default:
+                        color = Color.gray;
+                        layer = Layer.OkayBar;
+                        
+                        break;
+                }
+                
+                if (layer == previousLayer)
+                    continue;
 
-            pendingBeat = false;
+                previousLayer = layer;
+                segments.Add(CreateRectangle(Vector3.zero, new Vector3(width * BAR_WIDTH, BAR_HEIGHT, 1f), color * 0.8f, layer));
+            }
         }
 
         private static void PlaceTickAtTime(float timeOffset) {
@@ -256,7 +335,7 @@ namespace SRXDTimingBar {
             if (currentTick == tickCount)
                 currentTick = 0;
         }
-        
+
         private static GameObject CreateRectangle(Vector3 position, Vector3 scale, Color color, Layer layer) {
             var rectangle = new GameObject();
 
