@@ -1,29 +1,29 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
-using BepInEx.IL2CPP;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 
 namespace SRXDTimingBar {
-    [BepInPlugin("TimingBar", "TimingBar", "1.0.0.0")]
-    public class Main : BasePlugin {
-        public static ManualLogSource Logger { get; private set; }
+    [BepInPlugin("SRXD.TimingBar", "TimingBar", "1.1.0.0")]
+    [BepInDependency("SRXD.ScoreMod", BepInDependency.DependencyFlags.SoftDependency)]
+    public class Main : BaseUnityPlugin {
+        public new static ManualLogSource Logger { get; private set; }
         public static ConfigFile ConfigFile { get; private set; }
         public static ConfigEntry<float> BarPositionX { get; private set; }
         public static ConfigEntry<float> BarPositionY { get; private set; }
         public static ConfigEntry<bool> OrientVertically { get; private set; }
+        public static ConfigEntry<bool> ColoredTicks { get; private set; }
         public static ConfigEntry<int> TimingSamples { get; private set; }
         public static ConfigEntry<float> MedianSmoothing { get; private set; }
         
-        public override void Load() {
-            Logger = Log;
+        private void Awake() {
+            Logger = base.Logger;
             BarPositionX = Config.Bind("Transform", "BarPositionX", 0f, "The X position of the timing bar. Recommended to keep this value between -0.5 and 0.5");
             BarPositionY = Config.Bind("Transform", "BarPositionY", -0.35f, "The Y position of the timing bar. Recommended to keep this value between -0.5 and 0.5");
             OrientVertically = Config.Bind("Transform", "OrientVertically", false, "Orient the timing bar vertically instead of horizontally");
+            ColoredTicks = Config.Bind("Style", "ColoredTicks", true, "Color timing ticks based on the window they land in");
             TimingSamples = Config.Bind("Data", "TimingSamples", 16, "The maximum number of timing samples to display on the bar at once");
             MedianSmoothing = Config.Bind("Data", "MedianSmoothing", 0.1f, "The amount of smoothing to apply to the movement of the median pointer. A value of 0 will make it jump instantaneously");
             ConfigFile = Config;
@@ -31,6 +31,7 @@ namespace SRXDTimingBar {
             var harmony = new Harmony("TimingBar");
             
             harmony.PatchAll(typeof(Mod));
+            ScoreModWrapper.Initialize();
         }
     }
 
@@ -40,17 +41,22 @@ namespace SRXDTimingBar {
             GoodBar,
             GreatBar,
             PerfectBar,
-            ZeroLine,
             TimingTick,
+            ZeroLine,
             MedianPointer
         }
         
         private static readonly float BAR_WIDTH = 1.6f;
         private static readonly float BAR_HEIGHT = 0.04f;
-        private static float TICK_SPAN = 1.25f;
+        private static readonly float TICK_HEIGHT = 2.5f;
+        private static readonly float TICK_SPAN = 1.25f;
+        private static readonly float TICK_OPACITY = 0.5f;
+        private static readonly float TICK_LIGHTNESS = 0.1f;
+        private static readonly float SEGMENT_LIGHTNESS = 0.75f;
         private static bool initialized;
         private static bool playing;
         private static bool pendingBeat;
+        private static bool coloredTicks;
         private static int tickCount;
         private static int currentTick;
         private static float beatOffset;
@@ -61,9 +67,10 @@ namespace SRXDTimingBar {
         private static Transform root;
         private static Sprite rectSprite;
         private static List<GameObject> segments;
-        private static GameObject[] tickPool;
+        private static SpriteRenderer[] tickPool;
         private static Transform medianPointer;
         private static List<KeyValuePair<int, float>> timingHistory;
+        private static List<KeyValuePair<float, Color>> windows;
 
         [HarmonyPatch(typeof(Game), nameof(Game.Update)), HarmonyPostfix]
         private static void Game_Update_Postfix() {
@@ -115,7 +122,7 @@ namespace SRXDTimingBar {
                 root.gameObject.SetActive(true);
 
                 foreach (var tick in tickPool)
-                    tick.SetActive(false);
+                    tick.gameObject.SetActive(false);
 
                 targetMedian = 0f;
                 medianPointerX = 0f;
@@ -181,10 +188,7 @@ namespace SRXDTimingBar {
             pendingBeat = false;
         }
 
-        private static void Initialize(Track track)
-        {
-            ScoreModWrapper.Initialize();
-            
+        private static void Initialize(Track track) {
             root = new GameObject().transform;
             root.parent = track.cameraContainerTransform.GetComponentInChildren<Camera>().transform;
             root.localPosition = new Vector3(Main.BarPositionX.Value, Main.BarPositionY.Value, 0.5f);
@@ -197,63 +201,61 @@ namespace SRXDTimingBar {
             root.localScale = Vector3.one;
             rectSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 4f);
             tickCount = Main.TimingSamples.Value;
-            tickPool = new GameObject[tickCount];
+            tickPool = new SpriteRenderer[tickCount];
             medianSmoothing = Main.MedianSmoothing.Value;
+            coloredTicks = Main.ColoredTicks.Value;
 
             for (int i = 0; i < tickCount; i++) {
-                var newTick = CreateRectangle(Vector3.zero, new Vector3(0.35f * BAR_HEIGHT, 2f * BAR_HEIGHT, 1f), new Color(1f, 1f, 1f, 0.5f), Layer.TimingTick);
+                var newTick = CreateRectangle(Vector3.zero, new Vector3(0.35f * BAR_HEIGHT, TICK_HEIGHT * BAR_HEIGHT, 1f), new Color(1f, 1f, 1f, TICK_OPACITY), Layer.TimingTick);
                 
-                newTick.SetActive(false);
+                newTick.gameObject.SetActive(false);
                 tickPool[i] = newTick;
             }
 
-            medianPointerY = 0.65f * BAR_HEIGHT;
+            medianPointerY = 0.75f * BAR_HEIGHT;
             medianPointer = CreateRectangle(new Vector3(0f, medianPointerY, 0f), new Vector3(BAR_HEIGHT, BAR_HEIGHT, 1f), Color.white, Layer.MedianPointer).transform;
             timingHistory = new List<KeyValuePair<int, float>>();
+            windows = new List<KeyValuePair<float, Color>>();
             segments = new List<GameObject>();
-            CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_HEIGHT, 3f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine);
+            CreateRectangle(Vector3.zero, new Vector3(0.35f * BAR_HEIGHT, 3.5f * BAR_HEIGHT, 1f), Color.white, Layer.ZeroLine);
             initialized = true;
         }
 
-        private static void CreateTimingBar()
-        {
+        private static void CreateTimingBar() {
             if (!initialized)
                 return;
 
             foreach (var segment in segments)
                 GameObject.Destroy(segment);
             
+            windows.Clear();
             segments.Clear();
 
             if (ScoreModWrapper.ShowModdedScore)
                 CreateModTimingBar();
-            else
-            {
-                segments.Add(CreateRectangle(Vector3.zero, new Vector3(BAR_WIDTH, BAR_HEIGHT, 1f), Color.yellow * 0.8f, Layer.GoodBar));
-                segments.Add(CreateRectangle(Vector3.zero, new Vector3(0.5f * BAR_WIDTH, BAR_HEIGHT, 1f), Color.cyan * 0.8f, Layer.PerfectBar));
+            else {
+                AddSegment(0.05f, Color.cyan, Layer.PerfectBar);
+                AddSegment(0.1f, Color.yellow, Layer.GoodBar);
             }
         }
 
-        private static void CreateModTimingBar()
-        {
-            var profile = ScoreMod.ModState.CurrentContainer.Profile;
+        private static void CreateModTimingBar() {
+            var profileWindows = ScoreMod.ModState.CurrentContainer.Profile.PressNoteWindows;
             var previousLayer = Layer.ZeroLine;
 
-            for (int i = profile.PressNoteWindows.Count - 1; i >= 0; i--)
-            {
-                var window = profile.PressNoteWindows[i];
-                float width;
+            for (int i = 0; i < profileWindows.Count; i++) {
+                var window = profileWindows[i];
+                float upperBound;
 
-                if (i == profile.PressNoteWindows.Count - 1)
-                    width = 1f;
+                if (i == profileWindows.Count - 1)
+                    upperBound = 0.1f;
                 else
-                    width = 10f * profile.PressNoteWindows[i + 1].LowerBound;
+                    upperBound = profileWindows[i + 1].LowerBound;
                 
                 Color color;
                 Layer layer;
 
-                switch (window.Accuracy)
-                {
+                switch (window.Accuracy) {
                     case ScoreMod.Accuracy.Perfect:
                         color = Color.cyan;
                         layer = Layer.PerfectBar;
@@ -280,18 +282,44 @@ namespace SRXDTimingBar {
                     continue;
 
                 previousLayer = layer;
-                segments.Add(CreateRectangle(Vector3.zero, new Vector3(width * BAR_WIDTH, BAR_HEIGHT, 1f), color * 0.8f, layer));
+                AddSegment(upperBound, color, layer);
             }
+        }
+
+        private static void AddSegment(float window, Color color, Layer layer) {
+            segments.Add(CreateRectangle(Vector3.zero, new Vector3(10f * window * BAR_WIDTH, BAR_HEIGHT, 1f), SEGMENT_LIGHTNESS * color, layer).gameObject);
+
+            color = Color.Lerp(color, Color.white, TICK_LIGHTNESS);
+            color.a = TICK_OPACITY;
+            
+            windows.Add(new KeyValuePair<float, Color>(window, color));
         }
 
         private static void PlaceTickAtTime(float timeOffset) {
             var tick = tickPool[currentTick];
             
             if (timeOffset < -0.1f || timeOffset > 0.1f)
-                tick.SetActive(false);
+                tick.gameObject.SetActive(false);
             else {
-                tick.SetActive(true);
+                tick.gameObject.SetActive(true);
                 tick.transform.localPosition = new Vector3(TICK_SPAN * BAR_WIDTH * timeOffset, 0f, 0f);
+
+                if (coloredTicks) {
+                    var color = Color.white;
+
+                    float absOffset = Mathf.Abs(timeOffset);
+
+                    foreach (var pair in windows) {
+                        if (absOffset > pair.Key)
+                            continue;
+
+                        color = pair.Value;
+
+                        break;
+                    }
+
+                    tick.color = color;
+                }
             }
             
             if (timingHistory.Count >= tickCount - 1) {
@@ -336,7 +364,7 @@ namespace SRXDTimingBar {
                 currentTick = 0;
         }
 
-        private static GameObject CreateRectangle(Vector3 position, Vector3 scale, Color color, Layer layer) {
+        private static SpriteRenderer CreateRectangle(Vector3 position, Vector3 scale, Color color, Layer layer) {
             var rectangle = new GameObject();
 
             rectangle.transform.parent = root;
@@ -344,13 +372,13 @@ namespace SRXDTimingBar {
             rectangle.transform.localRotation = Quaternion.identity;
             rectangle.transform.localScale = scale;
             
-            var spriteRenderer = rectangle.AddComponent<SpriteRenderer>();
+            var renderer = rectangle.AddComponent<SpriteRenderer>();
             
-            spriteRenderer.sprite = rectSprite;
-            spriteRenderer.color = color;
-            spriteRenderer.sortingOrder = (int) layer;
+            renderer.sprite = rectSprite;
+            renderer.color = color;
+            renderer.sortingOrder = (int) layer;
 
-            return rectangle;
+            return renderer;
         }
     }
 }
