@@ -1,5 +1,4 @@
-﻿using System;
-using BepInEx.Bootstrap;
+﻿using BepInEx.Bootstrap;
 
 namespace SRXDTimingBar {
     public static class ScoreModWrapper {
@@ -16,7 +15,5 @@ namespace SRXDTimingBar {
             else
                 Main.Logger.LogMessage("ScoreMod not found");
         }
-
-        
     }
 }
