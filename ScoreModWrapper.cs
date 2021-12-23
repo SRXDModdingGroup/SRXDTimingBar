@@ -1,32 +1,22 @@
 ﻿using System;
-using System.IO;
+using BepInEx.Bootstrap;
 
-namespace SRXDTimingBar
-{
-    public static class ScoreModWrapper
-    {
-        public static bool ShowModdedScore => showModdedScore();
-        
-        private static Func<bool> showModdedScore;
+namespace SRXDTimingBar {
+    public static class ScoreModWrapper {
+        public static bool ShowModdedScore => scoreModLoaded && showModdedScore;
+        private static bool showModdedScore => ScoreMod.ModState.ShowModdedScore;
 
-        public static void Initialize()
-        {
-            try
-            {
-                GetScoreModFunctions();
+        private static bool scoreModLoaded;
+
+        public static void Initialize() {
+            scoreModLoaded = Chainloader.PluginInfos.ContainsKey("SRXD.ScoreMod");
+            
+            if (scoreModLoaded)
                 Main.Logger.LogMessage("Found ScoreMod");
-            }
-            catch (Exception)
-            {
-                showModdedScore = () => false;
+            else
                 Main.Logger.LogMessage("ScoreMod not found");
-            }
         }
 
-        private static void GetScoreModFunctions()
-        {
-            _ = ScoreMod.ModState.ShowModdedScore;
-            showModdedScore = () => ScoreMod.ModState.ShowModdedScore;
-        }
+        
     }
 }
