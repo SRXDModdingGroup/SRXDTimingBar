@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using SRXDScoreMod;
 
 namespace SRXDTimingBar {
@@ -7,21 +8,35 @@ namespace SRXDTimingBar {
         
         public static TimingWindow[] GetTimingWindows() {
             var fromTimingWindows = ScoreMod.CurrentScoreSystem.TimingWindowsForDisplay;
-            var toTimingWindows = new TimingWindow[fromTimingWindows.Length];
+            var toTimingWindows = new List<TimingWindow>();
 
-            for (int i = 0; i < toTimingWindows.Length; i++) {
+            for (int i = 0; i < fromTimingWindows.Length; i++) {
                 var fromWindow = fromTimingWindows[i];
+                float upperBound = fromWindow.UpperBound;
+                
+                if (upperBound <= -Main.Bounds)
+                    continue;
+
+                if (upperBound > Main.Bounds)
+                    upperBound = Main.Bounds;
+                
                 float lowerBound;
 
                 if (i > 0)
                     lowerBound = fromTimingWindows[i - 1].UpperBound;
                 else
-                    lowerBound = -0.13f;
+                    lowerBound = -Main.Bounds;
                 
-                toTimingWindows[i] = new TimingWindow(fromWindow.TimingAccuracy.Color, lowerBound, fromWindow.UpperBound);
+                if (lowerBound >= Main.Bounds)
+                    break;
+
+                if (lowerBound < -Main.Bounds)
+                    lowerBound = Main.Bounds;
+                
+                toTimingWindows.Add(new TimingWindow(fromWindow.TimingAccuracy.Color, lowerBound, upperBound));
             }
 
-            return toTimingWindows;
+            return toTimingWindows.ToArray();
         }
     }
 }

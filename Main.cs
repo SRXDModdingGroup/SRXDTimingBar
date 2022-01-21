@@ -10,6 +10,8 @@ namespace SRXDTimingBar {
     [BepInPlugin("SRXD.TimingBar", "TimingBar", "1.1.0.1")]
     [BepInDependency("SRXD.ScoreMod", BepInDependency.DependencyFlags.SoftDependency)]
     public class Main : BaseUnityPlugin {
+        public static float Bounds => 0.11f;
+        
         public new static ManualLogSource Logger { get; private set; }
         public static ConfigFile ConfigFile { get; private set; }
         public static ConfigEntry<float> BarPositionX { get; private set; }
@@ -134,9 +136,9 @@ namespace SRXDTimingBar {
                 }
             }
             else {
-                AddWindow(new TimingWindow(Color.yellow, -0.13f, -0.05f), 0);
+                AddWindow(new TimingWindow(Color.yellow, -Main.Bounds, -0.05f), 0);
                 AddWindow(new TimingWindow(Color.cyan, -0.05f, 0.05f), 1);
-                AddWindow(new TimingWindow(Color.yellow, 0.05f, 0.13f), 2);
+                AddWindow(new TimingWindow(Color.yellow, 0.05f, Main.Bounds), 2);
             }
         }
 
@@ -157,7 +159,7 @@ namespace SRXDTimingBar {
         private static void PlaceTickAtTime(float timeOffset) {
             var tick = tickPool[currentTick];
             
-            if (timeOffset < -0.13f || timeOffset > 0.13f)
+            if (timeOffset < -Main.Bounds || timeOffset > Main.Bounds)
                 tick.gameObject.SetActive(false);
             else {
                 tick.gameObject.SetActive(true);
