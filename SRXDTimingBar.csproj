@@ -31,6 +31,9 @@
         <ErrorReport>prompt</ErrorReport>
         <WarningLevel>4</WarningLevel>
     </PropertyGroup>
+    <PropertyGroup>
+      <PostBuildEvent>copy /Y "C:\Users\domia\Git\SRXDTimingBar\bin\Release\SRXDTimingBar.dll" "C:\Program Files (x86)\Steam\steamapps\common\Spin Rhythm\BepInEx\plugins"</PostBuildEvent>
+    </PropertyGroup>
     <ItemGroup>
         <Reference Include="0Harmony, Version=2.4.2.0, Culture=neutral, PublicKeyToken=null">
           <HintPath>Libs\0Harmony.dll</HintPath>
@@ -44,8 +47,8 @@
         <Reference Include="BepInEx.Preloader, Version=5.4.17.0, Culture=neutral, PublicKeyToken=null">
           <HintPath>Libs\BepInEx.Preloader.dll</HintPath>
         </Reference>
-        <Reference Include="ScoreMod, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
-          <HintPath>Libs\ScoreMod.dll</HintPath>
+        <Reference Include="SRXDScoreMod, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
+          <HintPath>Libs\SRXDScoreMod.dll</HintPath>
         </Reference>
         <Reference Include="SSD.Game, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null">
           <HintPath>Libs\SSD.Game.dll</HintPath>
@@ -86,6 +89,7 @@
         <Compile Include="Main.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
         <Compile Include="ScoreModWrapper.cs" />
+        <Compile Include="TimingWindow.cs" />
     </ItemGroup>
     <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
     <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
