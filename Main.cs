@@ -7,7 +7,7 @@ using HarmonyLib;
 using UnityEngine;
 
 namespace SRXDTimingBar {
-    [BepInPlugin("SRXD.TimingBar", "TimingBar", "1.1.0.1")]
+    [BepInPlugin("SRXD.TimingBar", "TimingBar", "1.1.0.2")]
     [BepInDependency("SRXD.ScoreMod", BepInDependency.DependencyFlags.SoftDependency)]
     public class Main : BaseUnityPlugin {
         public static float Bounds => 0.11f;
